@@ -1,11 +1,12 @@
 package cn.iocoder.yudao.framework.common.pojo;
 
+import cn.hutool.core.lang.Assert;
 import cn.iocoder.yudao.framework.common.exception.ErrorCode;
 import cn.iocoder.yudao.framework.common.exception.ServiceException;
 import cn.iocoder.yudao.framework.common.exception.enums.GlobalErrorCodeConstants;
+import cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
-import org.springframework.util.Assert;
 
 import java.io.Serializable;
 import java.util.Objects;
@@ -25,15 +26,15 @@ public class CommonResult<T> implements Serializable {
      */
     private Integer code;
     /**
-     * 返回数据
-     */
-    private T data;
-    /**
      * 错误提示，用户可阅读
      *
      * @see ErrorCode#getMsg() ()
      */
     private String msg;
+    /**
+     * 返回数据
+     */
+    private T data;
 
     /**
      * 将传入的 result 对象，转换成另外一个泛型结果的对象
@@ -49,10 +50,18 @@ public class CommonResult<T> implements Serializable {
     }
 
     public static <T> CommonResult<T> error(Integer code, String message) {
-        Assert.isTrue(!GlobalErrorCodeConstants.SUCCESS.getCode().equals(code), "code 必须是错误的！");
+        Assert.notEquals(GlobalErrorCodeConstants.SUCCESS.getCode(), code, "code 必须是错误的！");
         CommonResult<T> result = new CommonResult<>();
         result.code = code;
         result.msg = message;
+        return result;
+    }
+
+    public static <T> CommonResult<T> error(ErrorCode errorCode, Object... params) {
+        Assert.notEquals(GlobalErrorCodeConstants.SUCCESS.getCode(), errorCode.getCode(), "code 必须是错误的！");
+        CommonResult<T> result = new CommonResult<>();
+        result.code = errorCode.getCode();
+        result.msg = ServiceExceptionUtil.doFormat(errorCode.getCode(), errorCode.getMsg(), params);
         return result;
     }
 
@@ -93,6 +102,16 @@ public class CommonResult<T> implements Serializable {
         }
         // 业务异常
         throw new ServiceException(code, msg);
+    }
+
+    /**
+     * 判断是否有异常。如果有，则抛出 {@link ServiceException} 异常
+     * 如果没有，则返回 {@link #data} 数据
+     */
+    @JsonIgnore // 避免 jackson 序列化
+    public T getCheckedData() {
+        checkError();
+        return data;
     }
 
     public static <T> CommonResult<T> error(ServiceException serviceException) {
