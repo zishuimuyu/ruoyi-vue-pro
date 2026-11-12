@@ -2,9 +2,9 @@ package cn.iocoder.yudao.module.ai.controller.admin.chat.vo.conversation;
 
 import cn.iocoder.yudao.module.ai.dal.dataobject.model.AiModelDO;
 import cn.iocoder.yudao.module.ai.dal.dataobject.model.AiChatRoleDO;
-import com.fhs.core.trans.anno.Trans;
-import com.fhs.core.trans.constant.TransType;
-import com.fhs.core.trans.vo.VO;
+import org.dromara.core.trans.anno.Trans;
+import org.dromara.core.trans.constant.TransType;
+import org.dromara.core.trans.vo.VO;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -31,7 +31,8 @@ public class AiChatConversationRespVO implements VO {
     private Long roleId;
 
     @Schema(description = "模型编号", requiredMode = Schema.RequiredMode.REQUIRED, example = "1")
-    @Trans(type = TransType.SIMPLE, target = AiModelDO.class, fields = "name", ref = "modelName")
+    @Trans(type = TransType.SIMPLE, target = AiModelDO.class, fields = {"name", "reasoningConfig"},
+            refs = {"modelName", "modelReasoningConfig"})
     private Long modelId;
 
     @Schema(description = "模型标志", requiredMode = Schema.RequiredMode.REQUIRED, example = "ERNIE-Bot-turbo-0922")
@@ -54,6 +55,13 @@ public class AiChatConversationRespVO implements VO {
 
     @Schema(description = "创建时间", requiredMode = Schema.RequiredMode.REQUIRED)
     private LocalDateTime createTime;
+
+    // ========== 关联 model 信息 ==========
+
+    // easy-trans 只能直接赋值同类型的字段，所以使用 AiModelDO.ReasoningConfig
+    @Schema(description = "模型的思考配置；为空表示模型未配置思考",
+            example = "{\"levels\":[{\"level\":\"off\",\"options\":{\"thinking\":{\"type\":\"disabled\"}}}],\"defaultLevel\":\"off\"}")
+    private AiModelDO.ReasoningConfig modelReasoningConfig;
 
     // ========== 关联 role 信息 ==========
 

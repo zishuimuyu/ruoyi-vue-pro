@@ -1,12 +1,10 @@
 package cn.iocoder.yudao.module.iot.service.device.property;
 
 import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.convert.Convert;
 import cn.hutool.core.date.LocalDateTimeUtil;
-import cn.hutool.core.map.MapUtil;
+import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.iocoder.yudao.framework.common.util.json.JsonUtils;
-import cn.iocoder.yudao.framework.common.util.object.ObjectUtils;
 import cn.iocoder.yudao.module.iot.controller.admin.device.vo.property.IotDevicePropertyHistoryListReqVO;
 import cn.iocoder.yudao.module.iot.controller.admin.device.vo.property.IotDevicePropertyRespVO;
 import cn.iocoder.yudao.module.iot.core.mq.message.IotDeviceMessage;
@@ -14,14 +12,12 @@ import cn.iocoder.yudao.module.iot.dal.dataobject.device.IotDeviceDO;
 import cn.iocoder.yudao.module.iot.dal.dataobject.device.IotDevicePropertyDO;
 import cn.iocoder.yudao.module.iot.dal.dataobject.product.IotProductDO;
 import cn.iocoder.yudao.module.iot.dal.dataobject.thingmodel.IotThingModelDO;
-import cn.iocoder.yudao.module.iot.dal.dataobject.thingmodel.model.dataType.ThingModelDateOrTextDataSpecs;
 import cn.iocoder.yudao.module.iot.dal.redis.device.DevicePropertyRedisDAO;
 import cn.iocoder.yudao.module.iot.dal.redis.device.DeviceReportTimeRedisDAO;
 import cn.iocoder.yudao.module.iot.dal.redis.device.DeviceServerIdRedisDAO;
-import cn.iocoder.yudao.module.iot.dal.tdengine.IotDevicePropertyMapper;
-import cn.iocoder.yudao.module.iot.enums.thingmodel.IotDataSpecsDataTypeEnum;
+import cn.iocoder.yudao.module.iot.dal.storage.IotDevicePropertyDAO;
 import cn.iocoder.yudao.module.iot.enums.thingmodel.IotThingModelTypeEnum;
-import cn.iocoder.yudao.module.iot.framework.tdengine.core.TDengineTableField;
+import cn.iocoder.yudao.module.iot.framework.storage.core.util.IotStorageFieldUtils;
 import cn.iocoder.yudao.module.iot.service.device.IotDeviceService;
 import cn.iocoder.yudao.module.iot.service.product.IotProductService;
 import cn.iocoder.yudao.module.iot.service.thingmodel.IotThingModelService;
@@ -35,8 +31,10 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.*;
 
+import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.*;
 import static cn.iocoder.yudao.framework.common.util.collection.MapUtils.getBigDecimal;
+import static cn.iocoder.yudao.module.iot.enums.ErrorCodeConstants.DEVICE_PROPERTY_HISTORY_TIMES_INVALID;
 
 /**
  * IoT 设备【属性】数据 Service 实现类
@@ -46,23 +44,6 @@ import static cn.iocoder.yudao.framework.common.util.collection.MapUtils.getBigD
 @Service
 @Slf4j
 public class IotDevicePropertyServiceImpl implements IotDevicePropertyService {
-
-    /**
-     * 物模型的数据类型，与 TDengine 数据类型的映射关系
-     *
-     * @see <a href="https://docs.taosdata.com/reference/taos-sql/data-type/">TDEngine 数据类型</a>
-     */
-    private static final Map<String, String> TYPE_MAPPING = MapUtil.<String, String>builder()
-            .put(IotDataSpecsDataTypeEnum.INT.getDataType(), TDengineTableField.TYPE_INT)
-            .put(IotDataSpecsDataTypeEnum.FLOAT.getDataType(), TDengineTableField.TYPE_FLOAT)
-            .put(IotDataSpecsDataTypeEnum.DOUBLE.getDataType(), TDengineTableField.TYPE_DOUBLE)
-            .put(IotDataSpecsDataTypeEnum.ENUM.getDataType(), TDengineTableField.TYPE_TINYINT)
-            .put(IotDataSpecsDataTypeEnum.BOOL.getDataType(), TDengineTableField.TYPE_TINYINT)
-            .put(IotDataSpecsDataTypeEnum.TEXT.getDataType(), TDengineTableField.TYPE_VARCHAR)
-            .put(IotDataSpecsDataTypeEnum.DATE.getDataType(), TDengineTableField.TYPE_TIMESTAMP)
-            .put(IotDataSpecsDataTypeEnum.STRUCT.getDataType(), TDengineTableField.TYPE_VARCHAR)
-            .put(IotDataSpecsDataTypeEnum.ARRAY.getDataType(), TDengineTableField.TYPE_VARCHAR)
-            .build();
 
     @Resource
     private IotThingModelService thingModelService;
@@ -81,54 +62,24 @@ public class IotDevicePropertyServiceImpl implements IotDevicePropertyService {
     private DeviceServerIdRedisDAO deviceServerIdRedisDAO;
 
     @Resource
-    private IotDevicePropertyMapper devicePropertyMapper;
+    private IotDevicePropertyDAO devicePropertyDAO;
 
     // ========== 设备属性相关操作 ==========
 
     @Override
     public void defineDevicePropertyData(Long productId) {
-        // 1.1 查询产品和物模型
+        // 1. 查询产品和物模型
         IotProductDO product = productService.validateProductExists(productId);
         List<IotThingModelDO> thingModels = filterList(thingModelService.getThingModelListByProductId(productId),
                 thingModel -> IotThingModelTypeEnum.PROPERTY.getType().equals(thingModel.getType()));
-        // 1.2 解析 DB 里的字段
-        List<TDengineTableField> oldFields = new ArrayList<>();
-        try {
-            oldFields.addAll(devicePropertyMapper.getProductPropertySTableFieldList(product.getId()));
-        } catch (Exception e) {
-            if (!e.getMessage().contains("Table does not exist")) {
-                throw e;
-            }
-        }
-
-        // 2.1 情况一：如果是新增的时候，需要创建表
-        List<TDengineTableField> newFields = buildTableFieldList(thingModels);
-        if (CollUtil.isEmpty(oldFields)) {
-            if (CollUtil.isEmpty(newFields)) {
-                log.info("[defineDevicePropertyData][productId({}) 没有需要定义的属性]", productId);
-                return;
-            }
-            devicePropertyMapper.createProductPropertySTable(product.getId(), newFields);
-            return;
-        }
-        // 2.2 情况二：如果是修改的时候，需要更新表
-        devicePropertyMapper.alterProductPropertySTable(product.getId(), oldFields, newFields);
+        // 2. 定义存储结构：字段映射、差异比较、建表改表，由存储 DAO 实现
+        devicePropertyDAO.defineProductPropertyTable(product.getId(), thingModels);
     }
 
-    private List<TDengineTableField> buildTableFieldList(List<IotThingModelDO> thingModels) {
-        return convertList(thingModels, thingModel -> {
-            TDengineTableField field = new TDengineTableField(
-                    StrUtil.toUnderlineCase(thingModel.getIdentifier()), // TDengine 字段默认都是小写
-                    TYPE_MAPPING.get(thingModel.getProperty().getDataType()));
-            String dataType = thingModel.getProperty().getDataType();
-            if (Objects.equals(dataType, IotDataSpecsDataTypeEnum.TEXT.getDataType())) {
-                field.setLength(((ThingModelDateOrTextDataSpecs) thingModel.getProperty().getDataSpecs()).getLength());
-            } else if (ObjectUtils.equalsAny(dataType, IotDataSpecsDataTypeEnum.STRUCT.getDataType(),
-                    IotDataSpecsDataTypeEnum.ARRAY.getDataType())) {
-                field.setLength(TDengineTableField.LENGTH_VARCHAR);
-            }
-            return field;
-        });
+    @Override
+    public void deleteDevicePropertyData(Long productId) {
+        // 删除存储结构：TDengine、IoTDB 的 DDL 差异，由存储 DAO 实现
+        devicePropertyDAO.deleteProductPropertyTable(productId);
     }
 
     @Override
@@ -147,35 +98,36 @@ public class IotDevicePropertyServiceImpl implements IotDevicePropertyService {
         // 1. 根据物模型，拼接合法的属性
         // TODO @芋艿：【待定 004】赋能后，属性到底以 thingModel 为准（ik），还是 db 的表结构为准（tl）？
         List<IotThingModelDO> thingModels = thingModelService.getThingModelListByProductIdFromCache(device.getProductId());
-        Map<String, Object> properties = new HashMap<>();
+        Map<String, Object> properties = new LinkedHashMap<>();
         params.forEach((key, value) -> {
-            IotThingModelDO thingModel = CollUtil.findOne(thingModels, o -> o.getIdentifier().equals(key));
+            if (!(key instanceof CharSequence)) {
+                log.error("[saveDeviceProperty][消息({}) 的属性 key({}) 类型不正确]", message, key);
+                return;
+            }
+            if (value == null) {
+                log.warn("[saveDeviceProperty][消息({}) 的属性({}) 值为空，跳过]", message, key);
+                return;
+            }
+            // 忽略大小写匹配物模型，避免设备上报的 key 与 identifier 大小写不一致导致丢失
+            IotThingModelDO thingModel = CollUtil.findOne(thingModels,
+                    o -> StrUtil.equalsIgnoreCase(o.getIdentifier(), (CharSequence) key));
             if (thingModel == null || thingModel.getProperty() == null) {
                 log.error("[saveDeviceProperty][消息({}) 的属性({}) 不存在]", message, key);
                 return;
             }
-            String dataType = thingModel.getProperty().getDataType();
-            if (ObjectUtils.equalsAny(dataType,
-                    IotDataSpecsDataTypeEnum.STRUCT.getDataType(), IotDataSpecsDataTypeEnum.ARRAY.getDataType())) {
-                // 特殊：STRUCT 和 ARRAY 类型，在 TDengine 里，有没对应数据类型，只能通过 JSON 来存储
-                properties.put((String) key, JsonUtils.toJsonString(value));
-            } else if (IotDataSpecsDataTypeEnum.INT.getDataType().equals(dataType)) {
-                properties.put((String) key, Convert.toInt(value));
-            } else if (IotDataSpecsDataTypeEnum.FLOAT.getDataType().equals(dataType)) {
-                properties.put((String) key, Convert.toFloat(value));
-            } else if (IotDataSpecsDataTypeEnum.DOUBLE.getDataType().equals(dataType)) {
-                properties.put((String) key, Convert.toDouble(value));
-            }  else if (IotDataSpecsDataTypeEnum.BOOL.getDataType().equals(dataType)) {
-                properties.put((String) key, Convert.toByte(value));
-            }  else {
-                properties.put((String) key, value);
+            String identifier = thingModel.getIdentifier(); // 统一以物模型 identifier 作为 key，避免大小写问题
+            Object convertedValue = convertPropertyValue(message, thingModel, value);
+            if (convertedValue != null) {
+                properties.put(identifier, convertedValue);
             }
         });
         if (CollUtil.isEmpty(properties)) {
             log.error("[saveDeviceProperty][消息({}) 没有合法的属性]", message);
         } else {
             // 2.1 保存设备属性【数据】
-            devicePropertyMapper.insert(device, properties, LocalDateTimeUtil.toEpochMilli(message.getReportTime()));
+            devicePropertyDAO.insert(device, properties,
+                    System.currentTimeMillis(),
+                    LocalDateTimeUtil.toEpochMilli(message.getReportTime()));
 
             // 2.2 保存设备属性【日志】
             Map<String, IotDevicePropertyDO> properties2 = convertMap(properties.entrySet(), Map.Entry::getKey, entry ->
@@ -188,6 +140,23 @@ public class IotDevicePropertyServiceImpl implements IotDevicePropertyService {
         extractAndUpdateDeviceLocation(device, (Map<?, ?>) message.getParams());
     }
 
+    private Object convertPropertyValue(IotDeviceMessage message, IotThingModelDO thingModel, Object value) {
+        String identifier = thingModel.getIdentifier();
+        String dataType = thingModel.getProperty().getDataType();
+        try {
+            Object convertedValue = thingModelService.convertThingModelPropertyValue(thingModel, value);
+            if (convertedValue == null) {
+                log.warn("[saveDeviceProperty][消息({}) 的属性({}) 值({}) 无法转换为类型({})，跳过]",
+                        message, identifier, value, dataType);
+            }
+            return convertedValue;
+        } catch (Exception e) {
+            log.error("[saveDeviceProperty][消息({}) 的属性({}) 值({}) 转换为类型({}) 异常，跳过]",
+                    message, identifier, value, dataType, e);
+            return null;
+        }
+    }
+
     @Override
     public Map<String, IotDevicePropertyDO> getLatestDeviceProperties(Long deviceId) {
         return deviceDataRedisDAO.get(deviceId);
@@ -195,21 +164,33 @@ public class IotDevicePropertyServiceImpl implements IotDevicePropertyService {
 
     @Override
     public List<IotDevicePropertyRespVO> getHistoryDevicePropertyList(IotDevicePropertyHistoryListReqVO listReqVO) {
-        try {
-            return devicePropertyMapper.selectListByHistory(listReqVO);
-        } catch (Exception exception) {
-            if (exception.getMessage().contains("Table does not exist")) {
-                return Collections.emptyList();
-            }
-            throw exception;
+        // 1.1 校验时间范围：必须包含开始、结束两个时间；任一为空时，无法确定范围，返回空
+        LocalDateTime[] times = listReqVO.getTimes();
+        if (times == null || times.length != 2) {
+            throw exception(DEVICE_PROPERTY_HISTORY_TIMES_INVALID);
         }
+        if (times[0] == null || times[1] == null) {
+            return Collections.emptyList();
+        }
+        // 1.2 校验属性标识符：无法作为存储字段的标识符，不会有历史数据
+        if (!IotStorageFieldUtils.isPropertyFieldName(listReqVO.getIdentifier())) {
+            return Collections.emptyList();
+        }
+        // 1.3 校验设备：按当前租户查询，且过滤已删除的设备；不存在时，不查询历史数据
+        IotDeviceDO device = deviceService.getDevice(listReqVO.getDeviceId());
+        if (device == null) {
+            return Collections.emptyList();
+        }
+
+        // 2. 查询历史数据
+        return devicePropertyDAO.selectHistoryList(device.getProductId(), listReqVO);
     }
 
     // ========== 设备时间相关操作 ==========
 
     @Override
-    public Set<Long> getDeviceIdListByReportTime(LocalDateTime maxReportTime) {
-        return deviceReportTimeRedisDAO.range(maxReportTime);
+    public Map<Long, LocalDateTime> getDeviceReportTimeMapByReportTime(LocalDateTime maxReportTime) {
+        return deviceReportTimeRedisDAO.rangeWithScores(maxReportTime);
     }
 
     @Override
@@ -229,6 +210,16 @@ public class IotDevicePropertyServiceImpl implements IotDevicePropertyService {
     @Override
     public String getDeviceServerId(Long id) {
         return deviceServerIdRedisDAO.get(id);
+    }
+
+    @Override
+    public Long getGatewayServerStartTime(String serverId) {
+        return deviceServerIdRedisDAO.getGatewayServerStartTime(serverId);
+    }
+
+    @Override
+    public void updateGatewayServerStartTime(String serverId, Long startTime) {
+        deviceServerIdRedisDAO.updateGatewayServerStartTime(serverId, startTime);
     }
 
     // ========== 设备定位相关操作 ==========

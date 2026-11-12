@@ -26,6 +26,7 @@ public interface ErrorCodeConstants {
     ErrorCode BUSINESS_DELETE_FAIL_CONTRACT_EXISTS = new ErrorCode(1_020_002_001, "商机已关联合同，不能删除");
     ErrorCode BUSINESS_UPDATE_STATUS_FAIL_END_STATUS = new ErrorCode(1_020_002_002, "更新商机状态失败，原因：已经是结束状态");
     ErrorCode BUSINESS_UPDATE_STATUS_FAIL_STATUS_EQUALS = new ErrorCode(1_020_002_003, "更新商机状态失败，原因：已经是该状态");
+    ErrorCode BUSINESS_CONTACT_CUSTOMER_NOT_MATCH = new ErrorCode(1_020_002_004, "商机关联的联系人不属于该客户");
 
     // ========== 联系人管理 1-020-003-000 ==========
     ErrorCode CONTACT_NOT_EXISTS = new ErrorCode(1_020_003_000, "联系人不存在");
@@ -75,11 +76,14 @@ public interface ErrorCodeConstants {
     ErrorCode CRM_PERMISSION_DELETE_SELF_PERMISSION_FAIL_EXIST_OWNER = new ErrorCode(1_020_007_007, "删除数据权限失败，原因：不能删除负责人");
     ErrorCode CRM_PERMISSION_CREATE_FAIL = new ErrorCode(1_020_007_008, "创建数据权限失败，原因：所加用户已有权限");
     ErrorCode CRM_PERMISSION_CREATE_FAIL_EXISTS = new ErrorCode(1_020_007_009, "同时添加数据权限失败，原因：用户【{}】已有模块【{}】数据【{}】的【{}】权限");
+    ErrorCode CRM_PERMISSION_MODEL_TRANSFER_FAIL_OLD_OWNER_PERMISSION_LEVEL_ERROR = new ErrorCode(1_020_007_010, "{}操作失败，原因：老负责人的权限级别只能是只读或读写");
 
     // ========== 产品 1_020_008_000 ==========
     ErrorCode PRODUCT_NOT_EXISTS = new ErrorCode(1_020_008_000, "产品不存在");
     ErrorCode PRODUCT_NO_EXISTS = new ErrorCode(1_020_008_001, "产品编号已存在");
     ErrorCode PRODUCT_NOT_ENABLE = new ErrorCode(1_020_008_002, "产品【{}】已禁用");
+    ErrorCode PRODUCT_DELETE_FAIL_CONTRACT_EXISTS = new ErrorCode(1_020_008_003, "产品已被合同引用，无法删除");
+    ErrorCode PRODUCT_DELETE_FAIL_BUSINESS_EXISTS = new ErrorCode(1_020_008_004, "产品已被商机引用，无法删除");
 
     // ========== 产品分类 1_020_009_000 ==========
     ErrorCode PRODUCT_CATEGORY_NOT_EXISTS = new ErrorCode(1_020_009_000, "产品分类不存在");
@@ -103,6 +107,9 @@ public interface ErrorCodeConstants {
     ErrorCode FOLLOW_UP_RECORD_NOT_EXISTS = new ErrorCode(1_020_013_000, "跟进记录不存在");
     ErrorCode FOLLOW_UP_RECORD_DELETE_DENIED = new ErrorCode(1_020_013_001, "删除跟进记录失败，原因：没有权限");
 
-    // ========== 数据统计 1_020_014_000 ==========
+    // ========== 业绩目标配置 1_020_011_000 ==========
+    ErrorCode PERFORMANCE_CONFIG_NOT_EXISTS = new ErrorCode(1_020_011_000, "业绩目标配置不存在");
+    ErrorCode PERFORMANCE_CONFIG_EXISTS = new ErrorCode(1_020_011_001, "该对象当前年份的业绩目标配置已存在");
+    ErrorCode PERFORMANCE_CONFIG_TYPE_INVALID = new ErrorCode(1_020_011_002, "目标对象类型不正确");
 
 }

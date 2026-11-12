@@ -1,5 +1,6 @@
 package cn.iocoder.yudao.module.iot.framework.tdengine.core;
 
+import cn.iocoder.yudao.module.iot.dal.dataobject.thingmodel.model.ThingModelProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -27,9 +28,9 @@ public class TDengineTableField {
     public static final String TYPE_TIMESTAMP = "TIMESTAMP";
 
     /**
-     * 字段长度 - VARCHAR 默认长度
+     * 字段长度 - VARCHAR 默认长度，与 STRUCT、ARRAY 等 JSON 属性的长度上限保持一致
      */
-    public static final int LENGTH_VARCHAR = 1024;
+    public static final int LENGTH_VARCHAR = ThingModelProperty.LENGTH_JSON;
 
     /**
      * 注释 - TAG 字段

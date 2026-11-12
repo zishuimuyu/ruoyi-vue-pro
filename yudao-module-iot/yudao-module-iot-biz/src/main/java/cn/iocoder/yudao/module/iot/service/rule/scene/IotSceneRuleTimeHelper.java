@@ -3,14 +3,15 @@ package cn.iocoder.yudao.module.iot.service.rule.scene;
 import cn.hutool.core.lang.Assert;
 import cn.hutool.core.text.CharPool;
 import cn.hutool.core.util.StrUtil;
+import cn.iocoder.yudao.framework.common.util.date.LocalDateTimeUtils;
 import cn.iocoder.yudao.module.iot.enums.rule.IotSceneRuleConditionOperatorEnum;
 import cn.iocoder.yudao.module.iot.service.rule.scene.matcher.condition.IotCurrentTimeConditionMatcher;
 import cn.iocoder.yudao.module.iot.service.rule.scene.timer.IotTimerConditionEvaluator;
+import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -22,6 +23,7 @@ import java.util.List;
  * @author HUIHUI
  */
 @Slf4j
+@UtilityClass
 public class IotSceneRuleTimeHelper {
 
     /**
@@ -33,11 +35,6 @@ public class IotSceneRuleTimeHelper {
      * 时间格式化器 - HH:mm
      */
     private static final DateTimeFormatter TIME_FORMATTER_SHORT = DateTimeFormatter.ofPattern("HH:mm");
-
-    // TODO @puhui999：可以使用 lombok 简化
-    private IotSceneRuleTimeHelper() {
-        // 工具类，禁止实例化
-    }
 
     /**
      * 判断是否为日期时间操作符
@@ -76,7 +73,7 @@ public class IotSceneRuleTimeHelper {
             LocalDateTime now = LocalDateTime.now();
             if (isDateTimeOperator(operatorEnum)) {
                 // 日期时间匹配（时间戳，秒级）
-                long currentTimestamp = now.atZone(ZoneId.systemDefault()).toEpochSecond();
+                long currentTimestamp = LocalDateTimeUtils.toEpochSecond(now);
                 return matchDateTime(currentTimestamp, operatorEnum, param);
             } else {
                 // 当日时间匹配（HH:mm:ss）
@@ -136,7 +133,6 @@ public class IotSceneRuleTimeHelper {
         }
         long startTimestamp = Long.parseLong(timestampRange.get(0).trim());
         long endTimestamp = Long.parseLong(timestampRange.get(1).trim());
-        // TODO @puhui999：hutool 里，看看有没 between 方法
         return currentTimestamp >= startTimestamp && currentTimestamp <= endTimestamp;
     }
 
@@ -188,7 +184,6 @@ public class IotSceneRuleTimeHelper {
         }
         LocalTime startTime = parseTime(timeRange.get(0).trim());
         LocalTime endTime = parseTime(timeRange.get(1).trim());
-        // TODO @puhui999：hutool 里，看看有没 between 方法
         return !currentTime.isBefore(startTime) && !currentTime.isAfter(endTime);
     }
 

@@ -4,7 +4,9 @@ import cn.hutool.core.util.ObjectUtil;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
+import cn.iocoder.yudao.framework.mybatis.core.util.MyBatisUtils;
 import cn.iocoder.yudao.module.iot.controller.admin.device.vo.device.IotDevicePageReqVO;
+import cn.iocoder.yudao.module.iot.core.enums.device.IotDeviceStateEnum;
 import cn.iocoder.yudao.module.iot.dal.dataobject.device.IotDeviceDO;
 import cn.iocoder.yudao.module.iot.enums.product.IotProductDeviceTypeEnum;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -34,7 +36,7 @@ public interface IotDeviceMapper extends BaseMapperX<IotDeviceDO> {
                 .likeIfPresent(IotDeviceDO::getNickname, reqVO.getNickname())
                 .eqIfPresent(IotDeviceDO::getState, reqVO.getStatus())
                 .eqIfPresent(IotDeviceDO::getGatewayId, reqVO.getGatewayId())
-                .apply(ObjectUtil.isNotNull(reqVO.getGroupId()), "FIND_IN_SET(" + reqVO.getGroupId() + ",group_ids) > 0")
+                .apply(ObjectUtil.isNotNull(reqVO.getGroupId()), MyBatisUtils.findInSet("group_ids"), reqVO.getGroupId())
                 .orderByDesc(IotDeviceDO::getId));
     }
 
@@ -72,7 +74,7 @@ public interface IotDeviceMapper extends BaseMapperX<IotDeviceDO> {
 
     default Long selectCountByGroupId(Long groupId) {
         return selectCount(new LambdaQueryWrapperX<IotDeviceDO>()
-                .apply("FIND_IN_SET(" + groupId + ",group_ids) > 0"));
+                .apply(MyBatisUtils.findInSet("group_ids"), groupId));
     }
 
     default Long selectCountByCreateTime(@Nullable LocalDateTime createTime) {
@@ -129,6 +131,74 @@ public interface IotDeviceMapper extends BaseMapperX<IotDeviceDO> {
         return selectList(new LambdaQueryWrapperX<IotDeviceDO>()
                 .isNotNull(IotDeviceDO::getLatitude)
                 .isNotNull(IotDeviceDO::getLongitude));
+    }
+
+    // ========== 设备状态相关 ==========
+    // 说明：都是单条条件 UPDATE，依靠语句的原子性判断“是否生效”，不加锁；传入空实体，是为了让 update_time 自动填充
+
+    /**
+     * 更新设备为在线：设备不在线，且事件时间不早于最后离线时间时生效。首次上线时，同一条语句写入激活时间
+     *
+     * @param id   设备编号
+     * @param time 事件时间
+     * @return 是否生效（1 生效，0 未生效）
+     */
+    default int updateStateOnline(Long id, LocalDateTime time) {
+        return update(new IotDeviceDO(), new LambdaUpdateWrapper<IotDeviceDO>()
+                .set(IotDeviceDO::getState, IotDeviceStateEnum.ONLINE.getState())
+                .set(IotDeviceDO::getOnlineTime, time)
+                .setSql("active_time = COALESCE(active_time, {0})", time)
+                .eq(IotDeviceDO::getId, id)
+                .and(w -> w.isNull(IotDeviceDO::getState).or().ne(IotDeviceDO::getState, IotDeviceStateEnum.ONLINE.getState()))
+                .and(w -> w.isNull(IotDeviceDO::getOfflineTime).or().le(IotDeviceDO::getOfflineTime, time)));
+    }
+
+    /**
+     * 刷新在线设备的最后上线时间：只推进到更晚的事件时间，不改变状态
+     *
+     * @param id   设备编号
+     * @param time 事件时间
+     * @return 是否生效（1 生效，0 未生效）
+     */
+    default int updateOnlineTime(Long id, LocalDateTime time) {
+        return update(new IotDeviceDO(), new LambdaUpdateWrapper<IotDeviceDO>()
+                .set(IotDeviceDO::getOnlineTime, time)
+                .eq(IotDeviceDO::getId, id)
+                .eq(IotDeviceDO::getState, IotDeviceStateEnum.ONLINE.getState())
+                .and(w -> w.isNull(IotDeviceDO::getOnlineTime).or().lt(IotDeviceDO::getOnlineTime, time)));
+    }
+
+    /**
+     * 更新设备为离线：设备在线，且事件时间不早于最后上线时间时生效
+     *
+     * @param id   设备编号
+     * @param time 事件时间
+     * @return 是否生效（1 生效，0 未生效）
+     */
+    default int updateStateOffline(Long id, LocalDateTime time) {
+        return update(new IotDeviceDO(), new LambdaUpdateWrapper<IotDeviceDO>()
+                .set(IotDeviceDO::getState, IotDeviceStateEnum.OFFLINE.getState())
+                .set(IotDeviceDO::getOfflineTime, time)
+                .eq(IotDeviceDO::getId, id)
+                .eq(IotDeviceDO::getState, IotDeviceStateEnum.ONLINE.getState())
+                .and(w -> w.isNull(IotDeviceDO::getOnlineTime).or().le(IotDeviceDO::getOnlineTime, time)));
+    }
+
+    /**
+     * 推进不在线设备的最后离线时间（离线水位）：只推进到更晚的事件时间，不改变状态
+     *
+     * 作用：挡住回滚重投造成的误判在线。例如：上线 t1 回滚 → 离线 t2 → 上线 t1 重投，因 t1 早于 t2 被拒绝
+     *
+     * @param id   设备编号
+     * @param time 事件时间
+     * @return 是否生效（1 生效，0 未生效）
+     */
+    default int updateOfflineTime(Long id, LocalDateTime time) {
+        return update(new IotDeviceDO(), new LambdaUpdateWrapper<IotDeviceDO>()
+                .set(IotDeviceDO::getOfflineTime, time)
+                .eq(IotDeviceDO::getId, id)
+                .and(w -> w.isNull(IotDeviceDO::getState).or().ne(IotDeviceDO::getState, IotDeviceStateEnum.ONLINE.getState()))
+                .and(w -> w.isNull(IotDeviceDO::getOfflineTime).or().lt(IotDeviceDO::getOfflineTime, time)));
     }
 
     // ========== 网关-子设备绑定相关 ==========

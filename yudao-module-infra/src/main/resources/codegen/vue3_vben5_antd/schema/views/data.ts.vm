@@ -36,7 +36,7 @@ export function useFormSchema(): VbenFormSchema[] {
             id: 0,
             ${treeNameColumn.javaField}: '顶级${table.classComment}',
           });
-          return handleTree(data);
+          return handleTree(data, 'id', '${treeParentColumn.javaField}');
         },
         labelField: '${treeNameColumn.javaField}',
         valueField: 'id',
@@ -89,7 +89,7 @@ export function useFormSchema(): VbenFormSchema[] {
         placeholder: '请选择${comment}',
       },
   #elseif($column.htmlType == "checkbox")## 多选框
-      component: 'Checkbox',
+      component: 'CheckboxGroup',
       componentProps: {
         #if ("" != $dictType)## 有数据字典
         options: getDictOptions(DICT_TYPE.$dictType.toUpperCase(), '$dictMethod'),
@@ -123,6 +123,7 @@ export function useFormSchema(): VbenFormSchema[] {
   #elseif($column.htmlType == "inputNumber")## 数字输入框
       component: 'InputNumber',
       componentProps: {
+        class: '!w-full',
         min: 0,
         placeholder: '请输入${comment}',
       },
@@ -134,6 +135,21 @@ export function useFormSchema(): VbenFormSchema[] {
   ];
 }
 
+#if ($importEnable)
+/** 导入的表单 */
+export function useImportFormSchema(): VbenFormSchema[] {
+  return [
+    {
+      fieldName: 'file',
+      label: '${table.classComment}数据',
+      component: 'Upload',
+      rules: 'required',
+      help: '仅允许导入 xls、xlsx 格式文件',
+    },
+  ];
+}
+
+#end
 /** 列表的搜索表单 */
 export function useGridFormSchema(): VbenFormSchema[] {
   return [
@@ -290,7 +306,7 @@ export function use${subSimpleClassName}FormSchema(): VbenFormSchema[] {
                                     placeholder: '请选择${comment}',
                                 },
                             #elseif($column.htmlType == "checkbox")## 多选框
-                                component: 'Checkbox',
+                                component: 'CheckboxGroup',
                                 componentProps: {
                                     #if ("" != $dictType)## 有数据字典
                                         options: getDictOptions(DICT_TYPE.$dictType.toUpperCase(), '$dictMethod'),
@@ -324,6 +340,7 @@ export function use${subSimpleClassName}FormSchema(): VbenFormSchema[] {
                             #elseif($column.htmlType == "inputNumber")## 数字输入框
                                 component: 'InputNumber',
                                 componentProps: {
+                                    class: '!w-full',
                                     min: 0,
                                     placeholder: '请输入${comment}',
                                 },
@@ -429,6 +446,7 @@ export function use${subSimpleClassName}GridColumns(): VxeTableGridOptions<${api
                 #if ($column.createOperation || $column.updateOperation)
                     #if (!$column.primaryKey && $column.listOperationResult && $column.id != $subJoinColumn.id) ## 特殊：忽略主子表的 join 字段，不用填写
                         #set ($dictType = $column.dictType)
+                        #set ($javaType = $column.javaType)
                         #set ($javaField = $column.javaField)
                         #set ($comment = $column.columnComment)
                         #if ($javaType == "Integer" || $javaType == "Long" || $javaType == "Byte" || $javaType == "Short")
@@ -523,7 +541,7 @@ export function use${subSimpleClassName}GridColumns(): VxeTableGridOptions<${api
                                         placeholder: '请选择${comment}',
                                     },
                                 #elseif($column.htmlType == "checkbox")## 多选框
-                                    component: 'Checkbox',
+                                    component: 'CheckboxGroup',
                                     componentProps: {
                                         #if ("" != $dictType)## 有数据字典
                                             options: getDictOptions(DICT_TYPE.$dictType.toUpperCase(), '$dictMethod'),
@@ -557,6 +575,7 @@ export function use${subSimpleClassName}GridColumns(): VxeTableGridOptions<${api
                                 #elseif($column.htmlType == "inputNumber")## 数字输入框
                                     component: 'InputNumber',
                                     componentProps: {
+                                        class: '!w-full',
                                         min: 0,
                                         placeholder: '请输入${comment}',
                                     },
@@ -572,7 +591,7 @@ export function use${subSimpleClassName}GridColumns(): VxeTableGridOptions<${api
     #end
     #if ($table.templateType == 12) ## 内嵌情况
     /** 列表的字段 */
-    export function use${subSimpleClassName}GridColumns(): VxeTableGridOptions<${simpleClassName}Api.${subSimpleClassName}>['columns'] {
+    export function use${subSimpleClassName}GridColumns(): VxeTableGridOptions<${apiName}.${subSimpleClassName}>['columns'] {
         return [
             #foreach($column in $subColumns)
                 #if ($column.listOperationResult)

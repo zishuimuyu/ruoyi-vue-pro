@@ -29,14 +29,12 @@ import cn.iocoder.yudao.module.infra.api.file.FileApi;
 import com.alibaba.cloud.ai.dashscope.image.DashScopeImageOptions;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springaicommunity.qianfan.QianFanImageOptions;
 import org.springframework.ai.image.ImageModel;
 import org.springframework.ai.image.ImageOptions;
 import org.springframework.ai.image.ImagePrompt;
 import org.springframework.ai.image.ImageResponse;
 import org.springframework.ai.openai.OpenAiImageOptions;
 import org.springframework.ai.stabilityai.api.StabilityAiImageOptions;
-import org.springframework.ai.zhipuai.ZhiPuAiImageOptions;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,7 +46,9 @@ import java.util.Map;
 
 import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertMap;
+import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertMultiMap;
 import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.convertSet;
+import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.filterList;
 import static cn.iocoder.yudao.module.ai.enums.ErrorCodeConstants.*;
 
 /**
@@ -109,6 +109,7 @@ public class AiImageServiceImpl implements AiImageService {
     }
 
     @Async
+    @SuppressWarnings("ConstantValue")
     public void executeDrawImage(AiImageDO image, AiImageDrawReqVO reqVO, AiModelDO model) {
         try {
             // 1.1 构建请求
@@ -164,17 +165,8 @@ public class AiImageServiceImpl implements AiImageService {
                     .build();
         } else if (ObjUtil.equal(model.getPlatform(), AiPlatformEnum.TONG_YI.getPlatform())) {
             return DashScopeImageOptions.builder()
-                    .withModel(model.getModel()).withN(1)
-                    .withHeight(draw.getHeight()).withWidth(draw.getWidth())
-                    .build();
-        } else if (ObjUtil.equal(model.getPlatform(), AiPlatformEnum.YI_YAN.getPlatform())) {
-            return QianFanImageOptions.builder()
-                    .model(model.getModel()).N(1)
+                    .model(model.getModel()).n(1)
                     .height(draw.getHeight()).width(draw.getWidth())
-                    .build();
-        } else if (ObjUtil.equal(model.getPlatform(), AiPlatformEnum.ZHI_PU.getPlatform())) {
-            return ZhiPuAiImageOptions.builder()
-                    .model(model.getModel())
                     .build();
         }
         throw new IllegalArgumentException("不支持的 AI 平台：" + model.getPlatform());
@@ -239,10 +231,11 @@ public class AiImageServiceImpl implements AiImageService {
         // 3. 调用 Midjourney Proxy 提交任务
         List<String> base64Array = StrUtil.isBlank(drawReqVO.getReferImageUrl()) ? null :
                 Collections.singletonList("data:image/jpeg;base64,".concat(Base64.encode(HttpUtil.downloadBytes(drawReqVO.getReferImageUrl()))));
+        // 注意：绘图参数（--ar、--v 等）需要拼接到 prompt 中提交；Midjourney Proxy 的 state 只是自定义参数，不会提交给 Midjourney
+        String state = MidjourneyApi.ImagineRequest.buildState(drawReqVO.getWidth(),
+                drawReqVO.getHeight(), drawReqVO.getVersion(), model.getModel());
         MidjourneyApi.ImagineRequest imagineRequest = new MidjourneyApi.ImagineRequest(
-                base64Array, drawReqVO.getPrompt(),null,
-                MidjourneyApi.ImagineRequest.buildState(drawReqVO.getWidth(),
-                        drawReqVO.getHeight(), drawReqVO.getVersion(), model.getModel()));
+                base64Array, drawReqVO.getPrompt().concat(state), null, state);
         MidjourneyApi.SubmitResponse imagineResponse = midjourneyApi.imagine(imagineRequest);
 
         // 4.1 情况一【失败】：抛出业务异常
@@ -266,8 +259,25 @@ public class AiImageServiceImpl implements AiImageService {
         if (CollUtil.isEmpty(images)) {
             return 0;
         }
-        // 1.2 调用 Midjourney Proxy 获取任务进展
-        MidjourneyApi midjourneyApi = modelService.getMidjourneyApi(images.get(0).getModelId());
+        // 1.2 特殊：未关联模型的 image（历史 Action 生成的），无法确定 Midjourney Proxy，跳过同步，依赖回调更新
+        List<AiImageDO> unboundImages = filterList(images, image -> image.getModelId() == null);
+        if (CollUtil.isNotEmpty(unboundImages)) {
+            log.warn("[midjourneySync][image({}) 未关联模型，跳过同步]", convertSet(unboundImages, AiImageDO::getId));
+        }
+
+        // 2. 按照模型分组同步：不同模型可能对应不同的 Midjourney Proxy，需要使用各自的 API 查询
+        int count = 0;
+        Map<Long, List<AiImageDO>> modelImagesMap = convertMultiMap(
+                filterList(images, image -> image.getModelId() != null), AiImageDO::getModelId);
+        for (Map.Entry<Long, List<AiImageDO>> entry : modelImagesMap.entrySet()) {
+            count += midjourneySync(entry.getKey(), entry.getValue());
+        }
+        return count;
+    }
+
+    private int midjourneySync(Long modelId, List<AiImageDO> images) {
+        // 1. 调用 Midjourney Proxy 获取任务进展
+        MidjourneyApi midjourneyApi = modelService.getMidjourneyApi(modelId);
         List<MidjourneyApi.Notify> taskList = midjourneyApi.getTaskList(convertSet(images, AiImageDO::getTaskId));
         Map<String, MidjourneyApi.Notify> taskMap = convertMap(taskList, MidjourneyApi.Notify::id);
 
@@ -346,7 +356,7 @@ public class AiImageServiceImpl implements AiImageService {
 
         // 2. 调用 Midjourney Proxy 提交任务
         MidjourneyApi.SubmitResponse actionResponse = midjourneyApi.action(
-                new MidjourneyApi.ActionRequest(button.customId(), image.getTaskId(), null));
+                new MidjourneyApi.ActionRequest(image.getTaskId(), button.customId(), null));
         if (!MidjourneyApi.SubmitCodeEnum.SUCCESS_CODES.contains(actionResponse.code())) {
             String description = actionResponse.description().contains("quota_not_enough") ?
                     "账户余额不足" : actionResponse.description();
@@ -357,7 +367,7 @@ public class AiImageServiceImpl implements AiImageService {
         AiImageDO newImage = new AiImageDO().setUserId(image.getUserId()).setPublicStatus(false).setPrompt(image.getPrompt())
                 .setStatus(AiImageStatusEnum.IN_PROGRESS.getStatus())
                 .setPlatform(AiPlatformEnum.MIDJOURNEY.getPlatform())
-                .setModel(image.getModel()).setWidth(image.getWidth()).setHeight(image.getHeight())
+                .setModelId(image.getModelId()).setModel(image.getModel()).setWidth(image.getWidth()).setHeight(image.getHeight())
                 .setOptions(image.getOptions()).setTaskId(actionResponse.result());
         imageMapper.insert(newImage);
         return newImage.getId();

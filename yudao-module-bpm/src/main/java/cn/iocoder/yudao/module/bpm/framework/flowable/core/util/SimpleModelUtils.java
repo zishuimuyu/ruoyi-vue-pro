@@ -707,10 +707,9 @@ public class SimpleModelUtils {
                 List<String> list = convertList(item.getRules(), (rule) -> {
                     String rightSide = NumberUtil.isNumber(rule.getRightSide()) ? rule.getRightSide()
                             : "\"" + rule.getRightSide() + "\""; // 如果非数值类型加引号
-                    return String.format(" vars:getOrDefault(%s, null) %s var:convertByType(%s,%s) ",
+                    return String.format(BpmConditionOpCodeEnum.fromCode(rule.getOpCode()).getSymbol(),
                             rule.getLeftSide(), // 左侧：读取变量
-                            rule.getOpCode(), // 中间：操作符，比较
-                            rule.getLeftSide(), rightSide); // 右侧：转换变量，VariableConvertByTypeExpressionFunction
+                            rightSide); // 右侧：取值变量
                 });
                 // 构造条件组的表达式
                 Boolean and = item.getAnd();
@@ -879,11 +878,11 @@ public class SimpleModelUtils {
             if (childProcessSetting.getTimeoutSetting() != null && Boolean.TRUE.equals(childProcessSetting.getTimeoutSetting().getEnable())) {
                 BoundaryEvent boundaryEvent = null;
                 if (childProcessSetting.getTimeoutSetting().getType().equals(BpmDelayTimerTypeEnum.FIXED_DATE_TIME.getType())) {
-                    boundaryEvent = buildTimeoutBoundaryEvent(callActivity, BpmBoundaryEventTypeEnum.DELAY_TIMER_TIMEOUT.getType(),
-                            childProcessSetting.getTimeoutSetting().getTimeExpression(), null, null);
-                } else if (childProcessSetting.getTimeoutSetting().getType().equals(BpmDelayTimerTypeEnum.FIXED_TIME_DURATION.getType())) {
                     boundaryEvent = buildTimeoutBoundaryEvent(callActivity, BpmBoundaryEventTypeEnum.CHILD_PROCESS_TIMEOUT.getType(),
                             null, null, childProcessSetting.getTimeoutSetting().getTimeExpression());
+                } else if (childProcessSetting.getTimeoutSetting().getType().equals(BpmDelayTimerTypeEnum.FIXED_TIME_DURATION.getType())) {
+                    boundaryEvent = buildTimeoutBoundaryEvent(callActivity, BpmBoundaryEventTypeEnum.CHILD_PROCESS_TIMEOUT.getType(),
+                            childProcessSetting.getTimeoutSetting().getTimeExpression(), null, null);
                 }
                 flowElements.add(boundaryEvent);
             }
@@ -934,7 +933,7 @@ public class SimpleModelUtils {
         if (ObjUtil.isNotNull(timeDuration)) {
             eventDefinition.setTimeDuration(timeDuration);
         }
-        if (ObjUtil.isNotNull(timeDuration)) {
+        if (ObjUtil.isNotNull(timeCycle)) {
             eventDefinition.setTimeCycle(timeCycle);
         }
         if (ObjUtil.isNotNull(timeDate)) {
